@@ -1,3 +1,5 @@
+// Package web embeds the HTML, CSS, JavaScript and font assets into the
+// ExpenseOwl executable and serves them without an external web server.
 package web
 
 import (

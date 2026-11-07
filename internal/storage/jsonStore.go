@@ -14,6 +14,8 @@ import (
 )
 
 // JSONStore implementats Storage interface - for JSON file storage
+// jsonStore implements Storage with two JSON files under the configured data
+// directory. A RWMutex serialises access from the HTTP handlers.
 type jsonStore struct {
 	configPath string
 	filePath   string
@@ -21,6 +23,7 @@ type jsonStore struct {
 	defaults   map[string]string // allows reusing defaults without querying for config
 }
 
+// expensesFileData is the top-level document stored in expenses.json.
 type expensesFileData struct {
 	Expenses []Expense `json:"expenses"`
 }

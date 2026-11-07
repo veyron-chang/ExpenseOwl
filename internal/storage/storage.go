@@ -1,3 +1,5 @@
+// Package storage defines the persistence contract and the domain data
+// structures shared by the JSON and PostgreSQL implementations.
 package storage
 
 import (
@@ -8,7 +10,8 @@ import (
 	"time"
 )
 
-// Storage interface for all storage types
+// Storage is the persistence port used by the API layer. Both the JSON and
+// PostgreSQL backends must implement this interface.
 type Storage interface {
 	Close() error
 	GetConfig() (*Config, error)
@@ -44,7 +47,8 @@ type Storage interface {
 	// UpdateConversions(conversions map[string]float64) error
 }
 
-// config for expense data
+// Config stores the single-user application settings: category order,
+// active currency, the monthly start day and recurring rules.
 type Config struct {
 	Categories        []string           `json:"categories"`
 	Currency          string             `json:"currency"`
@@ -53,6 +57,8 @@ type Config struct {
 	// Tags              []string           `json:"tags"`
 }
 
+// RecurringExpense is a rule that generates Expense instances on a daily,
+// weekly, monthly or yearly interval.
 type RecurringExpense struct {
 	ID          string    `json:"id"`
 	Name        string    `json:"name"`
@@ -65,6 +71,7 @@ type RecurringExpense struct {
 	Occurrences int       `json:"occurrences"` // 0 for 3000 occurrences (heuristic)
 }
 
+// BackendType identifies the selected persistence implementation.
 type BackendType string
 
 const (
@@ -72,7 +79,8 @@ const (
 	BackendTypePostgres BackendType = "postgres"
 )
 
-// config for the storage backend
+// SystemConfig holds deployment-level storage settings read from environment
+// variables. It is not part of the user-facing application configuration.
 type SystemConfig struct {
 	StorageURL  string
 	StorageType BackendType
@@ -81,7 +89,8 @@ type SystemConfig struct {
 	StorageSSL  string
 }
 
-// expense struct
+// Expense is one ledger entry. A negative amount is spending and a positive
+// amount is income or a reimbursement.
 type Expense struct {
 	ID          string    `json:"id"`
 	RecurringID string    `json:"recurringID"`

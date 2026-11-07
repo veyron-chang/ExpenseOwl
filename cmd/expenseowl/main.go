@@ -1,3 +1,5 @@
+// Command expenseowl starts the ExpenseOwl HTTP server.
+// It wires the storage backend, API handlers and embedded web assets together.
 package main
 
 import (

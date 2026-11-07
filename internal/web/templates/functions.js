@@ -1,3 +1,8 @@
+/**
+ * Shared browser helpers for the dashboard, table and settings pages.
+ * This file contains no classes: it groups currency formatting, date/time
+ * conversion and month-boundary helpers used by the inline page scripts.
+ */
 const colorPalette = [
     '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', 
     '#FFBE0B', '#FF006E', '#8338EC', '#3A86FF', 

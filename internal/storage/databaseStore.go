@@ -13,6 +13,8 @@ import (
 )
 
 // databaseStore implements the Storage interface for PostgreSQL.
+// databaseStore implements Storage on PostgreSQL and uses database
+// transactions for rule/instance updates that must stay consistent.
 type databaseStore struct {
 	db       *sql.DB
 	defaults map[string]string // allows reusing defaults without querying for config

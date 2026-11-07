@@ -139,6 +139,12 @@
 
     <script src="/functions.js"></script>
     <script>
+        /**
+         * Dashboard page module.
+         * Responsibilities: load configuration and expenses, filter the
+         * selected month, aggregate category totals, render the doughnut
+         * chart and handle the add-expense form.
+         */
         let currentCurrency = 'usd';
         let startDate = 1;
         let pieChart = null;

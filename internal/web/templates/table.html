@@ -116,6 +116,11 @@
 
     <script src="/functions.js"></script>
     <script>
+        /**
+         * Table page module.
+         * Responsibilities: load expenses, filter by month or show all,
+         * render the editable table, and handle edit/delete actions.
+         */
         let currentCurrency = 'usd';
         let currentDate = new Date();
         let allExpenses = [];

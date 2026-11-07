@@ -1,3 +1,5 @@
+// Package api exposes the HTTP handlers for configuration, expenses,
+// recurring expenses and the embedded web pages.
 package api
 
 import (
@@ -12,7 +14,8 @@ import (
 	"github.com/tanq16/expenseowl/internal/web"
 )
 
-// Handler holds the storage interface
+// Handler is the HTTP boundary of the application. It translates requests
+// into Storage operations and serialises the results as JSON or HTML.
 type Handler struct {
 	storage storage.Storage
 }
