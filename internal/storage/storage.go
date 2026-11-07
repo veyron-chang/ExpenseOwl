@@ -176,6 +176,10 @@ func ValidateCategory(category string) (string, error) {
 	return sanitized, nil
 }
 
+// Validate normalizes the name and tags, then enforces the minimum fields
+// needed by every storage backend. Category is only checked for emptiness;
+// it is not sanitized here, which is why imported categories need separate
+// handling before they reach a template.
 func (e *Expense) Validate() error {
 	e.Name = SanitizeString(e.Name)
 	if e.Name == "" {
@@ -190,6 +194,8 @@ func (e *Expense) Validate() error {
 	// if e.Currency == "" {
 	// 	return fmt.Errorf("expense 'currency' cannot be empty")
 	// }
+	// Tags are cleaned one by one. Empty tags after sanitization are dropped
+	// rather than rejected, so a row with only invalid tags still passes.
 	if len(e.Tags) > 0 {
 		var cleanedTags []string
 		for _, tag := range e.Tags {
@@ -206,6 +212,8 @@ func (e *Expense) Validate() error {
 	return nil
 }
 
+// Validate checks a recurring rule. The two-occurrence minimum is stricter
+// than the settings UI, which labels zero as “indefinite”.
 func (e *RecurringExpense) Validate() error {
 	e.Name = SanitizeString(e.Name)
 	if e.Name == "" {
@@ -214,6 +222,8 @@ func (e *RecurringExpense) Validate() error {
 	if e.Category == "" {
 		return fmt.Errorf("recurring expense 'category' cannot be empty")
 	}
+	// Tags are cleaned one by one. Empty tags after sanitization are dropped
+	// rather than rejected, so a row with only invalid tags still passes.
 	if len(e.Tags) > 0 {
 		var cleanedTags []string
 		for _, tag := range e.Tags {
@@ -224,6 +234,8 @@ func (e *RecurringExpense) Validate() error {
 		}
 		e.Tags = cleanedTags
 	}
+	// The UI offers 0 for an indefinite rule, but this check rejects it and
+	// the generator also produces no rows when occurrences is zero.
 	if e.Occurrences < 2 {
 		return fmt.Errorf("at least 2 occurences required to recur")
 	}

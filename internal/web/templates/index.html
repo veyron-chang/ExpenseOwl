@@ -163,6 +163,10 @@
             });
         }
 
+        /**
+         * Sum negative amounts by category for the current month. Categories
+         * disabled in the legend are skipped; income is not included.
+         */
         function calculateCategoryBreakdown(expenses) {
             const categoryTotals = {};
             let totalAmount = 0;
@@ -194,6 +198,10 @@
                 .reduce((sum, exp) => sum + Math.abs(exp.amount), 0);
         }
 
+        /**
+         * Rebuild the chart and cashflow from allExpenses. getMonthExpenses()
+         * filters the full ledger again on every call.
+         */
         function updateChartAndLegend() {
             const monthExpenses = getMonthExpenses(allExpenses);
             const chartBox = document.querySelector('.chart-box');
@@ -337,6 +345,10 @@
             updateChartAndLegend();
         }
 
+        /**
+         * Load configuration and the complete expense list, then paint the
+         * dashboard. This function is called again after adding an expense.
+         */
         async function initialize() {
             try {
                 const configResponse = await fetch('/config');

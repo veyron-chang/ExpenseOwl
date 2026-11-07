@@ -84,6 +84,11 @@ function getISODateWithLocalTime(dateInput) {
     return localDateTime.toISOString();
 }
 
+/**
+ * Format an RFC3339 timestamp for display. The formatter uses the browser's
+ * local time zone, so a date-only import stored at 00:00 UTC can show the
+ * previous calendar day for users west of UTC.
+ */
 function formatDateFromUTC(utcDateString) {
     const date = new Date(utcDateString);
     return date.toLocaleDateString('en-US', {
@@ -103,6 +108,11 @@ function updateMonthDisplay() {
     }
 }
 
+/**
+ * Compute the start and end of the current reporting month in local time.
+ * startDate is the configured day-of-month; values larger than a month's
+ * length are clamped with Math.min. Quarter and year periods are not handled.
+ */
 function getMonthBounds(date) {
     const localDate = new Date(date);
     if (startDate === 1) {
@@ -122,6 +132,8 @@ function getMonthBounds(date) {
     const daysInPrevMonth = new Date(prevYear, prevMonth + 1, 0).getDate();
     prevMonthStartDate = Math.min(prevMonthStartDate, daysInPrevMonth);
 
+    // The anchor is before this month's start day, so the active period is
+    // the previous month's start through the day before this month's start.
     if (localDate.getDate() < thisMonthStartDate) {
         const startLocal = new Date(prevYear, prevMonth, prevMonthStartDate);
         const endLocal = new Date(currentYear, currentMonth, thisMonthStartDate - 1, 23, 59, 59, 999);
@@ -137,6 +149,10 @@ function getMonthBounds(date) {
     }
 }
 
+/**
+ * Filter the full ledger to the active month. This runs in the browser after
+ * /expenses has already transferred every historical row.
+ */
 function getMonthExpenses(expenses) {
     const { start, end } = getMonthBounds(currentDate);
     return expenses.filter(exp => {

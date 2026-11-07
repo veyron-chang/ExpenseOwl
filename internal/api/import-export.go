@@ -13,7 +13,9 @@ import (
 	"github.com/tanq16/expenseowl/internal/storage"
 )
 
-// exports all expenses to CSV
+// ExportCSV streams the full expense list as CSV. The ID column is included
+// so a later import can theoretically match records, but Currency and
+// RecurringID are not exported.
 func (h *Handler) ExportCSV(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "Method not allowed"})
@@ -56,7 +58,9 @@ func (h *Handler) ExportCSV(w http.ResponseWriter, r *http.Request) {
 	log.Println("HTTP: Exported expenses to CSV")
 }
 
-// imports expenses from CSV
+// ImportCSV parses a multipart CSV upload and writes every valid row
+// immediately. It has no preview step: parsing, validation, persistence and
+// category updates all happen in this one request.
 func (h *Handler) ImportCSV(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "Method not allowed"})
@@ -72,6 +76,9 @@ func (h *Handler) ImportCSV(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer file.Close()
+	// csv.Reader defaults to a comma delimiter. ReadAll also fails the whole
+	// file on a field-count mismatch, so the per-row length check below is only
+	// reachable for rows that survive the initial read.
 	reader := csv.NewReader(file)
 	records, err := reader.ReadAll()
 	if err != nil {
@@ -83,6 +90,8 @@ func (h *Handler) ImportCSV(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Header names are lower-cased and trimmed, but a UTF-8 BOM is not
+	// removed. A file with a BOM therefore fails to recognize its first column.
 	header := records[0]
 	colMap := make(map[string]int)
 	for i, col := range header {
@@ -127,7 +136,9 @@ func (h *Handler) ImportCSV(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		// Check if expense exists by ID, if provided - without doing a clash resolution
+		// The ID is only used for the existence check here. The Expense value
+		// built below never receives this ID, so a fresh import generates a new
+		// UUID and a later re-import checks an ID that is not in storage.
 		if idExists {
 			id := record[idIdx]
 			if _, err := h.storage.GetExpense(id); err == nil {
@@ -149,6 +160,8 @@ func (h *Handler) ImportCSV(w http.ResponseWriter, r *http.Request) {
 			localCurrency = strings.TrimSpace(currency)
 		}
 
+		// ParseFloat expects a dot decimal separator. Values such as 1.234,56
+		// fail here, and the raw field is not trimmed before parsing.
 		amount, err := strconv.ParseFloat(record[colMap["amount"]], 64)
 		if err != nil {
 			log.Printf("Warning: Skipping row %d due to invalid amount: %s\n", i+2, record[colMap["amount"]])
@@ -196,7 +209,10 @@ func (h *Handler) ImportCSV(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		importedCount++
-		time.Sleep(10 * time.Millisecond) // Throttle to reduce storage overhead
+		// One row per storage call, with a fixed delay. The delay soon dominates
+		// import time, especially in the JSON backend where every call rewrites
+		// the whole file.
+		time.Sleep(10 * time.Millisecond)
 	}
 
 	if len(newCategories) > 0 {
@@ -214,8 +230,9 @@ func (h *Handler) ImportCSV(w http.ResponseWriter, r *http.Request) {
 	log.Printf("HTTP: Imported %d expenses from CSV file. Skipped %d records.", importedCount, skippedCount)
 }
 
-// handles importing from ExpenseOwl < v4.0
-// TODO: remove this in the future
+// ImportOldCSV is the legacy importer for ExpenseOwl versions before v4.0.
+// It repeats most of ImportCSV and flips the amount sign based on the category
+// name, so the two import paths can drift apart.
 func (h *Handler) ImportOldCSV(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "Method not allowed"})
@@ -231,6 +248,9 @@ func (h *Handler) ImportOldCSV(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer file.Close()
+	// csv.Reader defaults to a comma delimiter. ReadAll also fails the whole
+	// file on a field-count mismatch, so the per-row length check below is only
+	// reachable for rows that survive the initial read.
 	reader := csv.NewReader(file)
 	records, err := reader.ReadAll()
 	if err != nil {
@@ -242,6 +262,8 @@ func (h *Handler) ImportOldCSV(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Header names are lower-cased and trimmed, but a UTF-8 BOM is not
+	// removed. A file with a BOM therefore fails to recognize its first column.
 	header := records[0]
 	colMap := make(map[string]int)
 	for i, col := range header {
@@ -273,6 +295,8 @@ func (h *Handler) ImportOldCSV(w http.ResponseWriter, r *http.Request) {
 			skippedCount++
 			continue
 		}
+		// ParseFloat expects a dot decimal separator. Values such as 1.234,56
+		// fail here, and the raw field is not trimmed before parsing.
 		amount, err := strconv.ParseFloat(record[colMap["amount"]], 64)
 		if err != nil {
 			log.Printf("Warning: Skipping row %d due to invalid amount: %s\n", i+2, record[colMap["amount"]])
@@ -291,7 +315,8 @@ func (h *Handler) ImportOldCSV(w http.ResponseWriter, r *http.Request) {
 			categorySet[strings.ToLower(category)] = true // Add to set to handle duplicates in the same file
 		}
 
-		// switches sign for new expenseowl
+		// Legacy files encode direction in the category name instead of the
+		// amount sign, so non-Income rows are flipped here.
 		amountUpdated := amount
 		if category != "Income" {
 			amountUpdated = amount * -1
@@ -331,6 +356,9 @@ func (h *Handler) ImportOldCSV(w http.ResponseWriter, r *http.Request) {
 	log.Printf("HTTP: Imported %d expenses from CSV file. Skipped %d records.", importedCount, skippedCount)
 }
 
+// parseDate accepts a short list of layouts and converts the result to UTC.
+// Date-only input therefore becomes midnight UTC, which can display as the
+// previous day in time zones west of UTC.
 func parseDate(dateStr string) (time.Time, error) {
 	dateFormats := []string{
 		time.RFC3339,

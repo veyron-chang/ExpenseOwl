@@ -224,6 +224,8 @@ func scanExpense(scanner interface{ Scan(...any) error }) (Expense, error) {
 	return expense, nil
 }
 
+// GetAllExpenses reads every row in date order. The SELECT omits the currency
+// column, so the returned Expense values always have an empty Currency field.
 func (s *databaseStore) GetAllExpenses() ([]Expense, error) {
 	query := `SELECT id, recurring_id, name, category, amount, date, tags FROM expenses ORDER BY date DESC`
 	rows, err := s.db.Query(query)
@@ -255,6 +257,8 @@ func (s *databaseStore) GetExpense(id string) (Expense, error) {
 	return expense, nil
 }
 
+// AddExpense inserts one row. Like the JSON backend, it falls back to
+// s.defaults for currency, which can be empty until the config is written.
 func (s *databaseStore) AddExpense(expense Expense) error {
 	if expense.ID == "" {
 		expense.ID = uuid.New().String()
@@ -277,6 +281,8 @@ func (s *databaseStore) AddExpense(expense Expense) error {
 	return err
 }
 
+// UpdateExpense writes a full replacement row. The UI does not send
+// RecurringID or Currency, so both are overwritten with zero values here.
 func (s *databaseStore) UpdateExpense(id string, expense Expense) error {
 	tagsJSON, err := json.Marshal(expense.Tags)
 	if err != nil {
@@ -321,6 +327,8 @@ func (s *databaseStore) RemoveExpense(id string) error {
 	return nil
 }
 
+// AddMultipleExpenses reuses AddExpense in a plain loop. There is no enclosing
+// transaction, so a failure halfway through leaves earlier rows committed.
 func (s *databaseStore) AddMultipleExpenses(expenses []Expense) error {
 	if len(expenses) == 0 {
 		return nil
@@ -522,6 +530,9 @@ func (s *databaseStore) RemoveRecurringExpense(id string, removeAll bool) error 
 	return tx.Commit()
 }
 
+// generateExpensesFromRecurring materializes a rule into concrete Expense
+// rows. It advances dates with AddDate, so a monthly rule starting on the 31st
+// can drift into the next month instead of clamping to the month end.
 func generateExpensesFromRecurring(recExp RecurringExpense, fromToday bool) []Expense {
 	var expenses []Expense
 	currentDate := recExp.StartDate
@@ -551,6 +562,8 @@ func generateExpensesFromRecurring(recExp RecurringExpense, fromToday bool) []Ex
 	// 	limit = 2000 // Heuristic for "indefinite"
 	// }
 
+	// limit is zero when Occurrences is zero, so the “indefinite” rule silently
+	// produces no instances at all.
 	for range limit {
 		expense := Expense{
 			ID:          uuid.New().String(),

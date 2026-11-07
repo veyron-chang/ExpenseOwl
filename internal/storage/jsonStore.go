@@ -75,6 +75,8 @@ func InitializeJsonStore(baseConfig SystemConfig) (*jsonStore, error) {
 
 // primitive methods
 
+// readExpensesFile loads and unmarshals the entire expense document. Every
+// read touches the whole file, so per-row callers become O(n²).
 func (s *jsonStore) readExpensesFile(path string) (*expensesFileData, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
@@ -88,6 +90,9 @@ func (s *jsonStore) readExpensesFile(path string) (*expensesFileData, error) {
 	return &data, nil
 }
 
+// writeExpensesFile rewrites the whole document in place. os.WriteFile
+// truncates first, so a crash or full disk during this call can leave a
+// partially written JSON file.
 func (s *jsonStore) writeExpensesFile(path string, data *expensesFileData) error {
 	content, err := json.MarshalIndent(data, "", "    ")
 	if err != nil {
@@ -358,6 +363,8 @@ func (s *jsonStore) GetExpense(id string) (Expense, error) {
 	return Expense{}, fmt.Errorf("expense with ID %s not found", id)
 }
 
+// AddExpense appends one record while holding the write lock. ID, currency
+// and date are filled only if the caller left them empty.
 func (s *jsonStore) AddExpense(expense Expense) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -368,6 +375,8 @@ func (s *jsonStore) AddExpense(expense Expense) error {
 	if expense.ID == "" {
 		expense.ID = uuid.New().String()
 	}
+	// defaults is only populated when the config is written. On a fresh
+	// process this can therefore store an empty currency string.
 	if expense.Currency == "" {
 		expense.Currency = s.defaults["currency"]
 	}
@@ -404,6 +413,8 @@ func (s *jsonStore) RemoveExpense(id string) error {
 	return s.writeExpensesFile(s.filePath, data)
 }
 
+// AddMultipleExpenses appends a batch but does not take the mutex. Its current
+// caller already holds the lock; the method is unsafe for a future importer.
 func (s *jsonStore) AddMultipleExpenses(expensesToAdd []Expense) error {
 	if len(expensesToAdd) == 0 {
 		return nil
@@ -447,6 +458,8 @@ func (s *jsonStore) RemoveMultipleExpenses(ids []string) error {
 	return s.writeExpensesFile(s.filePath, data)
 }
 
+// UpdateExpense replaces the stored record with the decoded request value.
+// Fields the caller did not send (RecurringID, Currency) are overwritten.
 func (s *jsonStore) UpdateExpense(id string, expense Expense) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

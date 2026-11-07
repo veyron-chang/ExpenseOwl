@@ -684,6 +684,11 @@
         }
 
         // --- Import/Export ---
+        /**
+         * Upload the selected CSV immediately. There is no preview or column
+         * mapping step; the page only renders the aggregate counts returned by
+         * the server.
+         */
         async function handleCsvImport(event) {
             const file = event.target.files[0];
             if (!file) return;

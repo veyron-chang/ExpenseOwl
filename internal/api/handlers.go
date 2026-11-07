@@ -169,6 +169,9 @@ func (h *Handler) UpdateStartDate(w http.ResponseWriter, r *http.Request) {
 // Expense Handlers
 // ------------------------------------------------------------
 
+// AddExpense validates one expense and hands it to the storage backend.
+// The handler does not assign an ID or currency; those defaults live in the
+// storage implementation.
 func (h *Handler) AddExpense(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
 		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "Method not allowed"})
@@ -194,6 +197,8 @@ func (h *Handler) AddExpense(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, expense)
 }
 
+// GetExpenses returns the entire ledger. There is no date filter, pagination
+// or projection here; the browser receives every historical row.
 func (h *Handler) GetExpenses(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "Method not allowed"})
@@ -208,6 +213,9 @@ func (h *Handler) GetExpenses(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, expenses)
 }
 
+// EditExpense decodes the request body into a new Expense value and passes it
+// to Storage.UpdateExpense. The UI sends only name/category/amount/date/tags,
+// so fields it omits are replaced with zero values.
 func (h *Handler) EditExpense(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
 		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "Method not allowed"})

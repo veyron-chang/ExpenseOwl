@@ -172,6 +172,10 @@
             `;
         }
 
+        /**
+         * Choose the rows to display. “Show all” keeps the full array;
+         * otherwise getMonthExpenses() filters the already-loaded ledger.
+         */
         function updateTable() {
             const showAll = document.getElementById('showAllToggle').checked;
             document.querySelector('.month-navigation').style.display = showAll ? 'none' : 'flex';
@@ -307,6 +311,10 @@
             });
         }
 
+        /**
+         * Load configuration and every expense, then render the table. A
+         * separate date-range request does not exist yet.
+         */
         async function initialize() {
             try {
                 const configResponse = await fetch('/config');
