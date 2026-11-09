@@ -78,6 +78,7 @@ type BackendType string
 const (
 	BackendTypeJSON     BackendType = "json"
 	BackendTypePostgres BackendType = "postgres"
+	BackendTypeMySQL    BackendType = "mysql"
 )
 
 // SystemConfig holds deployment-level storage settings read from environment
@@ -117,6 +118,22 @@ func (c *SystemConfig) SetStorageConfig() {
 	c.StorageSSL = backendSSLFromEnv(os.Getenv("STORAGE_SSL"))
 	c.StorageUser = os.Getenv("STORAGE_USER")
 	c.StoragePass = os.Getenv("STORAGE_PASS")
+
+	// MySQL has its own set of variables so it can coexist with the generic
+	// STORAGE_* variables used by the PostgreSQL backend.
+	if host := os.Getenv("MYSQL_HOST"); host != "" {
+		port := os.Getenv("MYSQL_PORT")
+		if port == "" {
+			port = "3306"
+		}
+		database := os.Getenv("MYSQL_DATABASE")
+		if database == "" {
+			database = "expenseowl"
+		}
+		c.StorageURL = host + ":" + port + "/" + database
+		c.StorageUser = os.Getenv("MYSQL_USER")
+		c.StoragePass = os.Getenv("MYSQL_PASSWORD")
+	}
 }
 
 func backendTypeFromEnv(env string) BackendType {
@@ -125,6 +142,8 @@ func backendTypeFromEnv(env string) BackendType {
 		return BackendTypeJSON
 	case "postgres":
 		return BackendTypePostgres
+	case "mysql":
+		return BackendTypeMySQL
 	default:
 		return BackendTypeJSON
 	}
@@ -155,6 +174,8 @@ func InitializeStorage() (Storage, error) {
 		return InitializeJsonStore(baseConfig)
 	case BackendTypePostgres:
 		return InitializePostgresStore(baseConfig)
+	case BackendTypeMySQL:
+		return InitializeMySQLStore(baseConfig)
 	}
 	return nil, fmt.Errorf("invalid data store: %s", baseConfig.StorageType)
 }
