@@ -73,7 +73,8 @@ func runServer(port int) {
 
 	// Expenses
 	http.HandleFunc("/expense", handler.AddExpense)                     // PUT for add
-	http.HandleFunc("/expenses", handler.GetExpenses)                   // GET all
+	http.HandleFunc("/expenses", handler.GetExpenses)                   // GET all or from/to
+	http.HandleFunc("/report", handler.GetReport)                       // GET period report
 	http.HandleFunc("/expense/edit", handler.EditExpense)               // PUT for edit
 	http.HandleFunc("/expense/delete", handler.DeleteExpense)           // DELETE for single
 	http.HandleFunc("/expenses/delete", handler.DeleteMultipleExpenses) // DELETE for multiple
@@ -87,6 +88,8 @@ func runServer(port int) {
 	// Import/Export
 	http.HandleFunc("/export/csv", handler.ExportCSV)
 	http.HandleFunc("/import/csv", handler.ImportCSV)
+	http.HandleFunc("/import/csv/preview", handler.PreviewCSV)
+	http.HandleFunc("/import/csv/commit", handler.CommitCSV)
 	http.HandleFunc("/import/csvold", handler.ImportOldCSV)
 
 	log.Println("Starting server on port", port, "...")

@@ -98,7 +98,7 @@
                         <a href="/export/csv" id="csv-export-file" class="nav-button" download="expenses.csv">Export to CSV</a>
                     </div>
                     <div class="import-option">
-                        <label for="csv-import-file" class="nav-button">Import from CSV</label>
+                        <label for="csv-import-file" class="nav-button">Select CSV to preview</label>
                         <input type="file" id="csv-import-file" accept=".csv" style="display: none;">
                     </div>
                     <div class="import-option">
@@ -106,6 +106,43 @@
                         <input type="file" id="csv-import-file-old" accept=".csv" style="display: none;">
                     </div>
                 </div>
+
+                <div id="importProfile" style="display: none; margin-top: 1rem;">
+                    <div class="form-group">
+                        <label for="importDelimiter">Delimiter</label>
+                        <select id="importDelimiter">
+                            <option value="auto">Auto detect</option>
+                            <option value="comma">Comma (,)</option>
+                            <option value="semicolon">Semicolon (;)</option>
+                            <option value="tab">Tab</option>
+                            <option value="pipe">Pipe (|)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="importDecimal">Decimal format</label>
+                        <select id="importDecimal">
+                            <option value="dot">1234.56</option>
+                            <option value="comma">1.234,56</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="importDefaultCategory">Default category</label>
+                        <select id="importDefaultCategory">
+                            <option value="">Use CSV category</option>
+                        </select>
+                    </div>
+                    <div class="form-group form-group-checkbox">
+                        <label for="importSkipDuplicates">Skip duplicates</label>
+                        <input type="checkbox" id="importSkipDuplicates" class="styled-checkbox" checked>
+                    </div>
+                    <div id="importPreviewSummary" class="import-summary"></div>
+                    <div id="importPreviewRows" style="max-height: 320px; overflow: auto; margin-top: 0.75rem;"></div>
+                    <div class="modal-buttons">
+                        <button type="button" id="cancelImportBtn" class="modal-button">Cancel</button>
+                        <button type="button" id="confirmImportBtn" class="modal-button confirm">Confirm Import</button>
+                    </div>
+                </div>
+
                 <div id="importMessage" class="form-message"></div>
                 <div id="importSummary" class="import-summary" style="display: none;">
                     <h3>Import Summary</h3>
@@ -684,52 +721,116 @@
         }
 
         // --- Import/Export ---
-        /**
-         * Upload the selected CSV immediately. There is no preview or column
-         * mapping step; the page only renders the aggregate counts returned by
-         * the server.
-         */
+        let pendingImportFile = null;
+
+        function importFormData(file) {
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('delimiter', document.getElementById('importDelimiter').value);
+            formData.append('decimal', document.getElementById('importDecimal').value);
+            formData.append('default_category', document.getElementById('importDefaultCategory').value);
+            formData.append('skip_duplicates', document.getElementById('importSkipDuplicates').checked ? 'true' : 'false');
+            return formData;
+        }
+
+        function renderImportPreview(result) {
+            const summary = document.getElementById('importPreviewSummary');
+            summary.innerHTML = `
+                <p>Total: ${result.total} | Ready: ${result.valid} | Duplicates: ${result.duplicates} | Invalid: ${result.invalid}</p>
+                <p>New categories: ${(result.new_categories || []).map(escapeHTML).join(', ') || 'None'}</p>
+            `;
+
+            const rows = result.rows || [];
+            let html = '<table class="expense-table"><thead><tr><th>Line</th><th>Status</th><th>Name</th><th>Category</th><th>Amount</th><th>Date</th><th>Message</th></tr></thead><tbody>';
+            rows.forEach(row => {
+                html += `<tr>
+                    <td>${row.line}</td>
+                    <td>${escapeHTML(row.status)}</td>
+                    <td>${escapeHTML(row.name || '')}</td>
+                    <td>${escapeHTML(row.category || '')}</td>
+                    <td>${row.amount !== undefined ? formatCurrency(row.amount) : ''}</td>
+                    <td>${escapeHTML(row.date || '')}</td>
+                    <td>${escapeHTML(row.message || '')}</td>
+                </tr>`;
+            });
+            html += '</tbody></table>';
+            document.getElementById('importPreviewRows').innerHTML = html;
+
+            document.getElementById('importProfile').style.display = 'block';
+            document.getElementById('confirmImportBtn').disabled = result.valid === 0;
+        }
+
         async function handleCsvImport(event) {
             const file = event.target.files[0];
             if (!file) return;
-            const formData = new FormData();
-            formData.append('file', file);
+            pendingImportFile = file;
+
             const messageDiv = document.getElementById('importMessage');
             const summaryDiv = document.getElementById('importSummary');
-
-            messageDiv.textContent = 'Importing... this may take a while for large files.';
+            messageDiv.textContent = 'Reading CSV and checking rows...';
             messageDiv.className = 'form-message';
             summaryDiv.style.display = 'none';
+            document.getElementById('importProfile').style.display = 'block';
 
             try {
-                const response = await fetch('/import/csv', {
+                const response = await fetch('/import/csv/preview', {
                     method: 'POST',
-                    body: formData
+                    body: importFormData(file)
                 });
-
                 const result = await response.json();
-
-                if (response.ok) {
-                    messageDiv.textContent = 'Import completed!';
-                    messageDiv.className = 'form-message success';
-                    summaryDiv.style.display = 'block';
-                    document.getElementById('summary-processed').textContent = result.total_processed;
-                    document.getElementById('summary-imported').textContent = result.imported;
-                    document.getElementById('summary-skipped').textContent = result.skipped;
-                    document.getElementById('summary-new-categories').textContent = (result.new_categories || []).join(', ') || 'None';
-                    
-                    await initialize();
-                } else {
-                    messageDiv.textContent = `Error: ${result.error || 'Failed to import CSV'}`;
-                    messageDiv.className = 'form-message error';
+                if (!response.ok) {
+                    throw new Error(result.error || 'Failed to preview CSV');
                 }
+                messageDiv.textContent = 'Preview ready. Check the rows, then confirm.';
+                messageDiv.className = 'form-message success';
+                renderImportPreview(result);
+            } catch (error) {
+                console.error('Error previewing CSV:', error);
+                messageDiv.textContent = `Error: ${error.message}`;
+                messageDiv.className = 'form-message error';
+                document.getElementById('importProfile').style.display = 'none';
+            }
+        }
+
+        async function confirmCsvImport() {
+            if (!pendingImportFile) return;
+            const messageDiv = document.getElementById('importMessage');
+            const summaryDiv = document.getElementById('importSummary');
+            messageDiv.textContent = 'Importing...';
+            messageDiv.className = 'form-message';
+
+            try {
+                const response = await fetch('/import/csv/commit', {
+                    method: 'POST',
+                    body: importFormData(pendingImportFile)
+                });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || 'Failed to import CSV');
+                }
+                messageDiv.textContent = `Import completed: ${result.imported} imported, ${result.duplicates} duplicates, ${result.invalid} invalid.`;
+                messageDiv.className = 'form-message success';
+                summaryDiv.style.display = 'block';
+                document.getElementById('summary-processed').textContent = result.total;
+                document.getElementById('summary-imported').textContent = result.imported;
+                document.getElementById('summary-skipped').textContent = result.duplicates + result.invalid;
+                document.getElementById('summary-new-categories').textContent = (result.new_categories || []).join(', ') || 'None';
+                pendingImportFile = null;
+                document.getElementById('csv-import-file').value = '';
+                document.getElementById('importProfile').style.display = 'none';
+                await initialize();
             } catch (error) {
                 console.error('Error importing CSV:', error);
-                messageDiv.textContent = 'Error: An unexpected error occurred during import.';
+                messageDiv.textContent = `Error: ${error.message}`;
                 messageDiv.className = 'form-message error';
-            } finally {
-                event.target.value = '';
             }
+        }
+
+        function cancelCsvImport() {
+            pendingImportFile = null;
+            document.getElementById('csv-import-file').value = '';
+            document.getElementById('importProfile').style.display = 'none';
+            document.getElementById('importMessage').textContent = '';
         }
 
         // TODO: remove in the future; handles import from EO < v3.20
@@ -803,6 +904,15 @@
                 populateStartDateInput();
                 document.getElementById('recurringCategory').innerHTML = categories.map(c => `<option value="${c}">${c}</option>`).join('');
                 document.getElementById('editRecurringCategory').innerHTML = categories.map(c => `<option value="${c}">${c}</option>`).join('');
+
+                const importCategory = document.getElementById('importDefaultCategory');
+                const previousImportCategory = importCategory.value;
+                importCategory.innerHTML = '<option value="">Use CSV category</option>' +
+                    categories.map(c => `<option value="${escapeHTML(c)}">${escapeHTML(c)}</option>`).join('');
+                if (categories.includes(previousImportCategory)) {
+                    importCategory.value = previousImportCategory;
+                }
+
                 renderRecurringExpenses(recurringExpenses);
 
                 createTagInput('tags-input', 'selected-tags', 'tags-dropdown', addFormSelectedTags);
@@ -845,6 +955,8 @@
         document.getElementById('saveStartDate').addEventListener('click', saveStartDate);
         document.getElementById('csv-import-file').addEventListener('change', handleCsvImport);
         document.getElementById('csv-import-file-old').addEventListener('change', handleCsvImportOld);
+        document.getElementById('confirmImportBtn').addEventListener('click', confirmCsvImport);
+        document.getElementById('cancelImportBtn').addEventListener('click', cancelCsvImport);
         document.getElementById('newCategory').addEventListener('keypress', e => e.key === 'Enter' && addCategory());
 
         document.getElementById('recurringExpenseForm').addEventListener('submit', async (e) => {

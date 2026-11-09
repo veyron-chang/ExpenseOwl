@@ -197,22 +197,6 @@ func (h *Handler) AddExpense(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, expense)
 }
 
-// GetExpenses returns the entire ledger. There is no date filter, pagination
-// or projection here; the browser receives every historical row.
-func (h *Handler) GetExpenses(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "Method not allowed"})
-		return
-	}
-	expenses, err := h.storage.GetAllExpenses()
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Failed to retrieve expenses"})
-		log.Printf("API ERROR: Failed to retrieve expenses: %v\n", err)
-		return
-	}
-	writeJSON(w, http.StatusOK, expenses)
-}
-
 // EditExpense decodes the request body into a new Expense value and passes it
 // to Storage.UpdateExpense. The UI sends only name/category/amount/date/tags,
 // so fields it omits are replaced with zero values.

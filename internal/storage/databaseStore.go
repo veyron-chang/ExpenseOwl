@@ -209,7 +209,7 @@ func scanExpense(scanner interface{ Scan(...any) error }) (Expense, error) {
 	var expense Expense
 	var tagsStr sql.NullString
 	var recurringID sql.NullString
-	err := scanner.Scan(&expense.ID, &recurringID, &expense.Name, &expense.Category, &expense.Amount, &expense.Date, &tagsStr)
+	err := scanner.Scan(&expense.ID, &recurringID, &expense.Name, &expense.Category, &expense.Amount, &expense.Currency, &expense.Date, &tagsStr)
 	if err != nil {
 		return Expense{}, err
 	}
@@ -224,11 +224,23 @@ func scanExpense(scanner interface{ Scan(...any) error }) (Expense, error) {
 	return expense, nil
 }
 
-// GetAllExpenses reads every row in date order. The SELECT omits the currency
-// column, so the returned Expense values always have an empty Currency field.
+// GetAllExpenses reads every row in date order. The SELECT includes currency
+// so the API can return complete Expense values.
 func (s *databaseStore) GetAllExpenses() ([]Expense, error) {
-	query := `SELECT id, recurring_id, name, category, amount, date, tags FROM expenses ORDER BY date DESC`
-	rows, err := s.db.Query(query)
+	return s.queryExpenses(`SELECT id, recurring_id, name, category, amount, currency, date, tags FROM expenses ORDER BY date DESC`)
+}
+
+// GetExpensesByDateRange returns expenses in the half-open [from, to) range.
+func (s *databaseStore) GetExpensesByDateRange(from, to time.Time) ([]Expense, error) {
+	return s.queryExpenses(
+		`SELECT id, recurring_id, name, category, amount, currency, date, tags
+		 FROM expenses WHERE date >= $1 AND date < $2 ORDER BY date DESC`,
+		from, to,
+	)
+}
+
+func (s *databaseStore) queryExpenses(query string, args ...any) ([]Expense, error) {
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query expenses: %v", err)
 	}
@@ -246,7 +258,7 @@ func (s *databaseStore) GetAllExpenses() ([]Expense, error) {
 }
 
 func (s *databaseStore) GetExpense(id string) (Expense, error) {
-	query := `SELECT id, recurring_id, name, category, amount, date, tags FROM expenses WHERE id = $1`
+	query := `SELECT id, recurring_id, name, category, amount, currency, date, tags FROM expenses WHERE id = $1`
 	expense, err := scanExpense(s.db.QueryRow(query, id))
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -333,13 +345,44 @@ func (s *databaseStore) AddMultipleExpenses(expenses []Expense) error {
 	if len(expenses) == 0 {
 		return nil
 	}
-	// use the same addexpense method
-	for _, exp := range expenses {
-		if err := s.AddExpense(exp); err != nil {
-			return err
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin import transaction: %v", err)
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`
+		INSERT INTO expenses (id, recurring_id, name, category, amount, currency, date, tags)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare import insert: %v", err)
+	}
+	defer stmt.Close()
+
+	for i := range expenses {
+		if expenses[i].ID == "" {
+			expenses[i].ID = uuid.New().String()
+		}
+		if expenses[i].Currency == "" {
+			expenses[i].Currency = s.defaults["currency"]
+		}
+		if expenses[i].Date.IsZero() {
+			expenses[i].Date = time.Now()
+		}
+		tagsJSON, err := json.Marshal(expenses[i].Tags)
+		if err != nil {
+			return fmt.Errorf("failed to encode tags: %v", err)
+		}
+		if _, err := stmt.Exec(
+			expenses[i].ID, expenses[i].RecurringID, expenses[i].Name,
+			expenses[i].Category, expenses[i].Amount, expenses[i].Currency,
+			expenses[i].Date, string(tagsJSON),
+		); err != nil {
+			return fmt.Errorf("failed to insert imported expense: %v", err)
 		}
 	}
-	return nil
+	return tx.Commit()
 }
 
 func (s *databaseStore) RemoveMultipleExpenses(ids []string) error {
@@ -388,7 +431,7 @@ func (s *databaseStore) GetRecurringExpenses() ([]RecurringExpense, error) {
 }
 
 func (s *databaseStore) GetRecurringExpense(id string) (RecurringExpense, error) {
-	query := `SELECT id, name, amount, category, start_date, interval, occurrences, tags FROM recurring_expenses WHERE id = $1`
+	query := `SELECT id, name, amount, currency, category, start_date, interval, occurrences, tags FROM recurring_expenses WHERE id = $1`
 	re, err := scanRecurringExpense(s.db.QueryRow(query, id))
 	if err != nil {
 		if err == sql.ErrNoRows {

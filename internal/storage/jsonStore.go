@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sort"
 	"sync"
 	"time"
 
@@ -66,11 +67,18 @@ func InitializeJsonStore(baseConfig SystemConfig) (*jsonStore, error) {
 		log.Println("Found existing expense storage config")
 	}
 
-	return &jsonStore{
+	store := &jsonStore{
 		configPath: configPath,
 		filePath:   filePath,
 		defaults:   map[string]string{},
-	}, nil
+	}
+	config, err := store.readConfigFile(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load initial config: %v", err)
+	}
+	store.defaults["currency"] = config.Currency
+	store.defaults["start_date"] = fmt.Sprintf("%d", config.StartDate)
+	return store, nil
 }
 
 // primitive methods
@@ -244,7 +252,7 @@ func (s *jsonStore) AddRecurringExpense(recurringExpense RecurringExpense) error
 		return fmt.Errorf("failed to write config file: %v", err)
 	}
 	expensesToAdd := generateExpensesFromRecurring(recurringExpense, false)
-	return s.AddMultipleExpenses(expensesToAdd)
+	return s.addMultipleExpensesLocked(expensesToAdd)
 }
 
 func (s *jsonStore) RemoveRecurringExpense(id string, removeAll bool) error {
@@ -347,6 +355,26 @@ func (s *jsonStore) GetAllExpenses() ([]Expense, error) {
 	return data.Expenses, nil
 }
 
+// GetExpensesByDateRange filters the in-memory ledger to [from, to) and
+// returns it in descending date order.
+func (s *jsonStore) GetExpensesByDateRange(from, to time.Time) ([]Expense, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	data, err := s.readExpensesFile(s.filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read storage file: %v", err)
+	}
+	out := make([]Expense, 0)
+	for _, expense := range data.Expenses {
+		if expense.Date.Before(from) || !expense.Date.Before(to) {
+			continue
+		}
+		out = append(out, expense)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Date.After(out[j].Date) })
+	return out, nil
+}
+
 func (s *jsonStore) GetExpense(id string) (Expense, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -413,9 +441,17 @@ func (s *jsonStore) RemoveExpense(id string) error {
 	return s.writeExpensesFile(s.filePath, data)
 }
 
-// AddMultipleExpenses appends a batch but does not take the mutex. Its current
-// caller already holds the lock; the method is unsafe for a future importer.
+// AddMultipleExpenses appends a batch under the write lock. It is used by the
+// CSV importer, so IDs and defaults are filled here rather than in the caller.
 func (s *jsonStore) AddMultipleExpenses(expensesToAdd []Expense) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.addMultipleExpensesLocked(expensesToAdd)
+}
+
+// addMultipleExpensesLocked is the inner batch append used by callers that
+// already hold s.mu, such as AddRecurringExpense.
+func (s *jsonStore) addMultipleExpensesLocked(expensesToAdd []Expense) error {
 	if len(expensesToAdd) == 0 {
 		return nil
 	}
@@ -423,8 +459,19 @@ func (s *jsonStore) AddMultipleExpenses(expensesToAdd []Expense) error {
 	if err != nil {
 		return fmt.Errorf("failed to read storage file: %v", err)
 	}
+	for i := range expensesToAdd {
+		if expensesToAdd[i].ID == "" {
+			expensesToAdd[i].ID = uuid.New().String()
+		}
+		if expensesToAdd[i].Currency == "" {
+			expensesToAdd[i].Currency = s.defaults["currency"]
+		}
+		if expensesToAdd[i].Date.IsZero() {
+			expensesToAdd[i].Date = time.Now()
+		}
+	}
 	data.Expenses = append(data.Expenses, expensesToAdd...)
-	log.Printf("Added %d new recurring expense instances\n", len(expensesToAdd))
+	log.Printf("Added %d expenses in one batch\n", len(expensesToAdd))
 	return s.writeExpensesFile(s.filePath, data)
 }
 

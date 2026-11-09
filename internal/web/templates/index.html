@@ -53,6 +53,11 @@
             <button id="prevMonth" class="nav-button"><i class="fa-solid fa-arrow-left"></i></button>
             <div class="current-month" id="currentMonth"></div>
             <button id="nextMonth" class="nav-button"><i class="fa-solid fa-arrow-right"></i></button>
+            <select id="periodKind" class="nav-button" style="margin-left: 0.5rem;">
+                <option value="month">Month</option>
+                <option value="quarter">Quarter</option>
+                <option value="year">Year</option>
+            </select>
         </div>
 
         <div class="table-controls">
@@ -149,6 +154,8 @@
         let startDate = 1;
         let pieChart = null;
         let currentDate = new Date();
+        let currentKind = 'month';
+        let currentReport = null;
         let allExpenses = [];
         let disabledCategories = new Set();
         let categoryColors = {};
@@ -336,13 +343,122 @@
             legendContainer.insertAdjacentHTML('beforeend', totalsHtml);
         }
 
+        function localDateString(date) {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        }
+
+        async function loadReport() {
+            document.getElementById('currentMonth').textContent = 'Loading...';
+            const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+            const url = `/report?period=${encodeURIComponent(currentKind)}&anchor=${localDateString(currentDate)}&tz=${encodeURIComponent(tz)}`;
+            const response = await fetch(url);
+            if (!response.ok) {
+                const error = await response.json().catch(() => ({}));
+                throw new Error(error.error || 'Failed to load report');
+            }
+            currentReport = await response.json();
+            document.getElementById('currentMonth').textContent = currentReport.period.label;
+            renderReport();
+        }
+
+        function renderReport() {
+            if (!currentReport) return;
+            const chartBox = document.querySelector('.chart-box');
+            const legendBox = document.getElementById('customLegend');
+            const cashflowSection = document.getElementById('cashflow-section');
+            const noDataMessage = document.getElementById('noDataMessage');
+
+            const allCategories = (currentReport.categories || []).filter(c => c.expense > 0);
+            assignCategoryColors(allCategories.map(c => c.name));
+            const active = allCategories.filter(c => !disabledCategories.has(c.name));
+            const activeTotal = active.reduce((sum, c) => sum + c.expense, 0);
+            const chartData = active.map(c => ({
+                category: c.name,
+                total: c.expense,
+                percentage: activeTotal > 0 ? (c.expense / activeTotal) * 100 : 0
+            }));
+
+            if (allCategories.length === 0) {
+                if (pieChart) {
+                    pieChart.destroy();
+                    pieChart = null;
+                }
+                chartBox.style.display = 'none';
+                legendBox.style.display = 'none';
+                cashflowSection.style.display = 'none';
+                noDataMessage.textContent = 'No expenses recorded for this period.';
+                noDataMessage.style.display = 'block';
+                return;
+            }
+
+            chartBox.style.display = 'flex';
+            legendBox.style.display = 'flex';
+            cashflowSection.style.display = 'flex';
+            noDataMessage.style.display = 'none';
+            updateCashflowFromReport(currentReport.totals);
+            updateLegendFromReport(allCategories, chartData);
+            createPieChart(chartData);
+        }
+
+        function updateCashflowFromReport(totals) {
+            const income = totals.income || 0;
+            const expenseTotal = totals.expense || 0;
+            const balance = totals.balance || 0;
+            document.getElementById('cashflow-income').textContent = formatCurrency(income);
+            document.getElementById('cashflow-expenses').textContent = formatCurrency(expenseTotal);
+            document.getElementById('cashflow-balance').textContent = formatCurrency(balance);
+
+            const balanceElement = document.getElementById('cashflow-balance');
+            balanceElement.classList.toggle('positive', balance >= 0);
+            balanceElement.classList.toggle('negative', balance < 0);
+        }
+
+        function updateLegendFromReport(allCategories, chartData) {
+            const legendContainer = document.getElementById('customLegend');
+            legendContainer.innerHTML = '';
+            const activeMap = new Map(chartData.map(c => [c.category, c]));
+
+            allCategories.forEach(category => {
+                const activeItem = activeMap.get(category.name);
+                const item = document.createElement('div');
+                item.className = `legend-item${disabledCategories.has(category.name) ? ' disabled' : ''}`;
+                const color = categoryColors[category.name];
+                const percentage = category.share ? ` (${(category.share * 100).toFixed(1)}%)` : '';
+                item.innerHTML = `
+                    <div class="color-box" style="background-color: ${color}"></div>
+                    <div class="legend-text">
+                        <span>${escapeHTML(category.name)}${percentage}</span>
+                        <span class="amount">${formatCurrency(category.expense)}</span>
+                    </div>
+                `;
+                item.addEventListener('click', () => toggleCategory(category.name));
+                legendContainer.appendChild(item);
+                if (!activeItem && !disabledCategories.has(category.name)) {
+                    console.warn('Category missing from active chart data:', category.name);
+                }
+            });
+
+            const activeTotal = chartData.reduce((sum, c) => sum + c.total, 0);
+            legendContainer.insertAdjacentHTML('beforeend', `
+                <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border);">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span>Total:</span>
+                        <span class="amount">${formatCurrency(activeTotal)}</span>
+                    </div>
+                </div>
+            `);
+        }
+
         function toggleCategory(category) {
             if (disabledCategories.has(category)) {
                 disabledCategories.delete(category);
             } else {
                 disabledCategories.add(category);
             }
-            updateChartAndLegend();
+            renderReport();
         }
 
         /**
@@ -360,23 +476,8 @@
                 ).join('');
                 currentCurrency = config.currency;
                 startDate = config.startDate;
-                
-                const response = await fetch('/expenses');
-                if (!response.ok) throw new Error('Failed to fetch data');
-                const data = await response.json();
-                allExpenses = Array.isArray(data) ? data : (data && Array.isArray(data.expenses) ? data.expenses : []);
-
-                allTags.clear();
-                allExpenses.forEach(exp => {
-                    if (exp.tags) {
-                        exp.tags.forEach(tag => allTags.add(tag));
-                    }
-                });
-                
-                const uniqueCategories = [...new Set(allExpenses.map(exp => exp.category))];
-                assignCategoryColors(uniqueCategories);
-                updateMonthDisplay();
-                updateChartAndLegend();
+                assignCategoryColors(config.categories);
+                await loadReport();
                 setupTagInput();
             } catch (error) {
                 console.error('Failed to initialize dashboard:', error);
@@ -469,16 +570,22 @@
             });
         }
 
-        document.getElementById('prevMonth').addEventListener('click', () => {
-            currentDate.setMonth(currentDate.getMonth() - 1);
-            updateMonthDisplay();
-            updateChartAndLegend();
-        });
+        function shiftPeriod(delta) {
+            if (currentKind === 'month' || currentKind === 'quarter') {
+                currentDate.setDate(15);
+                currentDate.setMonth(currentDate.getMonth() + delta * (currentKind === 'quarter' ? 3 : 1));
+            } else {
+                currentDate.setFullYear(currentDate.getFullYear() + delta);
+            }
+            loadReport().catch(error => console.error('Failed to shift report period:', error));
+        }
 
-        document.getElementById('nextMonth').addEventListener('click', () => {
-            currentDate.setMonth(currentDate.getMonth() + 1);
-            updateMonthDisplay();
-            updateChartAndLegend();
+        document.getElementById('prevMonth').addEventListener('click', () => shiftPeriod(-1));
+        document.getElementById('nextMonth').addEventListener('click', () => shiftPeriod(1));
+        document.getElementById('periodKind').addEventListener('change', (event) => {
+            currentKind = event.target.value;
+            currentDate = new Date();
+            loadReport().catch(error => console.error('Failed to change report period:', error));
         });
 
         document.getElementById('toggleExpenseFormBtn').addEventListener('click', function() {
@@ -521,7 +628,7 @@
                     document.getElementById('expenseForm').reset();
                     document.getElementById('selected-tags').innerHTML = '';
                     selectedTags.clear();
-                    await initialize();
+                    await loadReport();
                     const today = new Date();
                     const year = today.getFullYear();
                     const month = String(today.getMonth() + 1).padStart(2, '0');

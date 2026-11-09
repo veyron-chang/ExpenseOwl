@@ -35,6 +35,7 @@ type Storage interface {
 
 	// Expenses
 	GetAllExpenses() ([]Expense, error)
+	GetExpensesByDateRange(from, to time.Time) ([]Expense, error)
 	GetExpense(id string) (Expense, error)
 	AddExpense(expense Expense) error
 	RemoveExpense(id string) error
